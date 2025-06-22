@@ -1,122 +1,126 @@
 import json
-import pytz
-from datetime import datetime, time
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 import logging
+from datetime import datetime, time
+import pytz
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-# Configure logging for better debugging
+# Saitin logging don ganin abubuwan da ke faruwa
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Function to load configuration with error handling
-def load_config(filename='config.json'):
-    """Loads bot configuration from a JSON file."""
-    try:
-        with open(filename, 'r') as f:
-            config = json.load(f)
-        return config
-    except FileNotFoundError:
-        logger.error(f"Error: Config file '{filename}' not found. Please create it with 'bot_token' and 'user_id'.")
-        # Exit the script if the config file is missing, as it's critical.
-        exit(1) # [1, 2, 3]
-    except json.JSONDecodeError as e:
-        logger.error(f"Error: Invalid JSON in '{filename}': {e}")
-        # Exit if the JSON is malformed.
-        exit(1) # [4, 5]
-    except KeyError as e:
-        logger.error(f"Error: Missing key in '{filename}': {e}. Ensure 'bot_token' and 'user_id' are present.")
-        # Exit if required keys are missing.
-        exit(1) # [4]
+# Load config.json
+# Wannan sashin yana kokarin bude fayil din 'config.json' don samun 'bot_token' da 'user_id'.
+# Idan fayil din babu ko kuma akwai kuskure a JSON, zai bayar da sako kuma ya tsaya.
+try:
+    with open('config.json', 'r') as f:
+        config = json.load(f)
+except FileNotFoundError:
+    logger.error("Ba a samo fayil din config.json ba. Da fatan za a kirkiri fayil din tare da 'bot_token' da 'user_id'.")
+    exit()
+except json.JSONDecodeError:
+    logger.error("Akwai kuskure a fayil din config.json. Da fatan za a tabbatar cewa JSON din daidai ne.")
+    exit()
 
-# Load configuration
-config = load_config()
-BOT_TOKEN = config['bot_token']
-USER_ID = config['user_id'] # This USER_ID will be used for sending daily reminders
+BOT_TOKEN = config.get('bot_token')
+USER_ID = config.get('user_id') # Wannan shine ID na mai amfani da za a aikawa da tunatarwa.
 
-# Daily messages mapped by day
+if not BOT_TOKEN:
+    logger.error("BOT_TOKEN ba a samo shi ba a config.json. Da fatan za a tabbatar an saita shi.")
+    exit()
+# Lura: Ba za mu fita ba idan USER_ID bai kasance ba, saboda ana iya samunsa ta hanyar /start command.
+
+# Sakonni na yau da kullum da aka tsara ta ranar mako
 daily_messages = {
     'Sunday': "🗓️ Yau Lahadi ne –\n❌ Avoid trading\n✅ Prepare Weekly Zones\n🔍 Review last week's setups",
     'Monday': "🗓️ Yau Litinin ne –\n⚠️ Watch Accumulation / False BOS\n✅ Mark liquidity zones + structure\n❌ No early entry",
     'Tuesday': "🗓️ Yau Talata ne –\n✅ Wait for BOS confirmation\n✅ Enter based on 15min + 5min confluence\n💡 NY Open = sniper entry",
     'Wednesday': "🗓️ Yau Laraba ne –\n🔥 Most reliable day for entries\n✅ Breakout / Retest / SMC trades\n🎯 Continue/reverse Monday-Tuesday zone",
     'Thursday': "🗓️ Yau Alhamis ne –\n✅ Strong continuation from Wed\n⚠️ Be ready for profit-taking\n✅ Trail SL and manage",
-    'Friday': "🗓️ Yau Jumma’a ne –\n⚠️ Exit before NY session close\n🧾 Trade review + journal update",
+    'Friday': "🗓️ Yau Jumma’a ne –\n⚠️ Exit before NY session close\n✅ Avoid late entries\n🧾 Trade review + journal update",
     'Saturday': "🗓️ Yau Asabar ne –\n❌ No trade (Crypto only, manipulated)\n✅ Backtest or Learn strategy"
 }
 
-# Define the /start command handler
-async def start_command(update: Update, context: CallbackContext) -> None:
-    """Sends a welcome message when the /start command is issued."""
-    user = update.effective_user
-    await update.message.reply_html(
-        f"Sannu, {user.mention_html()}! Barka da zuwa bot din Daily Trading Reminders. "
-        "Zan rika tura maka sakon tunatarwa na yau da kullum da karfe 9:00 na safe (Africa/Lagos lokaci). "
-        "Idan kana so ka daina karbar sakonni, danna /stop."
-    ) # [6, 7]
-    logger.info(f"User {user.id} ({user.full_name}) started the bot.")
+# --- Command Handlers ---
 
-# Define the /stop command handler
-async def stop_command(update: Update, context: CallbackContext) -> None:
-    """Sends a goodbye message and stops daily reminders for the user."""
-    user = update.effective_user
-    await update.message.reply_text("Na gode da amfani da bot din. Ba zan sake tura maka sakonni ba.")
-    # In a more complex application, you might want to remove the user's chat_id
-    # from a list of active users or disable reminders specifically for this chat_id.
-    logger.info(f"User {user.id} ({user.full_name}) stopped the bot.")
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Wannan aikin yana aiko da sako na maraba lokacin da mai amfani ya fara bot din (/start).
+    Kuma yana nuna ID na mai amfani don taimaka masa ya saita 'user_id' a 'config.json'.
+    """
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    first_name = update.effective_user.first_name
+    
+    await update.message.reply_text(
+        f"Sannu, {first_name}! Maraba da zuwa bot din kasuwar kasuwanci.\n"
+        f"Makin shaidarku (User ID) shine: `{user_id}`.\n"
+        f"Da fatan za ku duba 'config.json' domin tabbatar da cewa 'user_id' dinku ya dace da wannan. Sannan ku fara aiki da bot din yadda ya kamata."
+    )
+    logger.info(f"An karbi /start daga mai amfani: {user_id} (username: {username})")
 
-# Daily reminder function (adapted for python-telegram-bot's JobQueue)
-async def send_daily_reminder_job(context: CallbackContext) -> None:
-    """Sends a daily reminder message to the configured USER_ID."""
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Wannan aikin yana aiko da sako na taimako lokacin da aka danna /help."""
+    await update.message.reply_text("Wannan bot yana aiko muku da tunatarwa ta yau da kullum game da kasuwanci.\n"
+                                    "Kuna iya amfani da /start don fara aiki da bot din kuma ku sami ID dinku.\n"
+                                    "Bot din zai aiko da tunatarwa da karfe 9:00 na safe (lokacin Lagos) kowace rana.")
+
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Yana amsa duk wani sako da aka aiko masa da shi daidai."""
+    logger.info(f"An karbi sako daga {update.effective_user.id}: {update.message.text}")
+    # Kawai don gwaji, za mu iya amsa duk wani sako.
+    # update.message.reply_text(f"Na karbi sakonku: {update.message.text}")
+
+# --- Scheduled Job ---
+
+async def send_daily_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Wannan aikin yana aiko da sakon tunatarwa na yau da kullum zuwa ga 'user_id' da aka saita a 'config.json'.
+    Wannan aikin zai gudana ta hanyar 'job_queue' na bot.
+    """
+    # Duba ko akwai USER_ID a config.json
+    if not USER_ID:
+        logger.warning("USER_ID ba a saita shi ba a config.json. Ba za a iya aiko da tunatarwa ta yau da kullum ba.")
+        return
+
     today = datetime.now(pytz.timezone('Africa/Lagos')).strftime('%A')
-    message = daily_messages.get(today, "No message for today.")
+    message = daily_messages.get(today, "Babu sako na yau.")
+    
     try:
         await context.bot.send_message(chat_id=USER_ID, text=message)
-        logger.info(f"Daily reminder sent for {today} to chat_id {USER_ID}.")
+        logger.info(f"An aiko da tunatarwa ta yau da kullum zuwa {USER_ID} don {today}.")
     except Exception as e:
-        logger.error(f"Failed to send daily reminder to chat_id {USER_ID}: {e}") # [8]
-
-# Error handler for the dispatcher
-async def error_handler(update: object, context: CallbackContext) -> None:
-    """Log the error and send a telegram message to notify the developer (optional)."""
-    logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
-    # You might want to send a message to a specific admin chat_id for critical errors.
-    # For example: await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Error: {context.error}") # [9, 10]
+        logger.error(f"Kuskure yayin aiko da tunatarwa ta yau da kullum zuwa {USER_ID}: {e}")
 
 def main() -> None:
-    """Start the bot."""
-    # Create the Application and pass it your bot's token.
-    # This is the modern way to initialize the bot in python-telegram-bot v20+.
-    application = Application.builder().token(BOT_TOKEN).build() #
+    """Yana fara bot din kuma yana saita duk wani mai sarrafa umarni da aikin tsari."""
+    # Kirkiri Application kuma ba shi token din bot din ka.
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    # Get the dispatcher to register handlers.
-    # The Dispatcher routes all kinds of updates to its registered handlers.
-    # With Application, you add handlers directly to the application.
-    
-    # Add command handlers for /start and /stop
-    application.add_handler(CommandHandler("start", start_command)) # [11, 6, 7]
-    application.add_handler(CommandHandler("stop", stop_command))
+    # Add command handlers
+    # Wannan yana hada aikin 'start_command' da umarnin '/start'.
+    application.add_handler(CommandHandler("start", start_command))
+    # Wannan yana hada aikin 'help_command' da umarnin '/help'.
+    application.add_handler(CommandHandler("help", help_command))
+    # Wannan yana karbar duk wani sako wanda ba umarni ba.
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    # Get the JobQueue instance from the Application.
-    # This is python-telegram-bot's built-in scheduler.
-    job_queue = application.job_queue # [12, 13]
+    # Tsarawa aikin tunatarwa na yau da kullum
+    # Wannan zai gudana kowace rana da karfe 9:00 na safe (lokacin Africa/Lagos).
+    job_queue = application.job_queue
+    job_queue.run_daily(
+        send_daily_reminder_job, 
+        time=time(hour=9, minute=0, tzinfo=pytz.timezone('Africa/Lagos')),
+        name="Daily Reminder"
+    )
+    logger.info("An tsara aikin tunatarwa na yau da kullum don 9:00 AM (lokacin Africa/Lagos).")
 
-    # Schedule the daily reminder job using JobQueue.
-    # It will run every day at 9:00 AM in the 'Africa/Lagos' timezone.
-    job_queue.run_daily(send_daily_reminder_job, time=time(hour=9, minute=0, tzinfo=pytz.timezone('Africa/Lagos'))) # [12, 13, 14]
-    logger.info("Daily reminder job scheduled for 9:00 AM Africa/Lagos.")
-
-    # Add a global error handler to catch unhandled exceptions.
-    application.add_error_handler(error_handler)
-
-    # Run the bot.
-    # This begins the long-polling process to fetch updates from Telegram.
-    # application.run_polling() replaces updater.start_polling() and updater.idle()
-    application.run_polling(allowed_updates=Update.ALL_TYPES) #
+    # Fara aikin bot din har sai mai amfani ya danna Ctrl-C
+    logger.info("Bot ya fara sauraron sakonni...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
-    
+
